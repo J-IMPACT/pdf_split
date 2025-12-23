@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PDF Splitter (GitHub Pages)</title>
+</head>
+<body>
+  <h1>PDFをページ数ごとに分割してZIPで保存</h1>
+
+  <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+    <input id="file" type="file" accept="application/pdf" />
+
+    <label>
+      分割ページ数:
+      <input id="chunk" type="number" min="1" value="10" style="width:80px;">
+    </label>
+
+    <label>
+      出力ファイル名:
+      <input id="basename" type="text" value="output" style="width:160px;">
+    </label>
+
+    <button id="run">分割してZIPをダウンロード</button>
+  </div>
+
+  <p id="status"></p>
+
+  <!-- pdf-lib -->
+  <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  <!-- jszip -->
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
+  <script>
+    const fileEl = document.getElementById('file');
+    const chunkEl = document.getElementById('chunk');
+    const baseEl = document.getElementById('basename');
+    const runBtn = document.getElementById('run');
+    const statusEl = document.getElementById('status');
+
+    function setStatus(msg) {
+      statusEl.textContent = msg;
+    }
+
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    runBtn.addEventListener('click', async () => {
+      const file = fileEl.files?.[0];
+      const chunk = Number(chunkEl.value);
+      const baseName = baseEl.value.trim();
+
+      if (!file) {
+        setStatus("PDFを選択してください");
+        return;
+      }
+      if (!Number.isFinite(chunk) || chunk <= 0) {
+        setStatus("分割ページ数が不正です");
+        return;
+      }
+      if (!baseName) {
+        setStatus("出力ファイル名を指定してください");
+        return;
+      }
+
+      setStatus("PDFを読み込み中…");
+      const buffer = await file.arrayBuffer();
+
+      const { PDFDocument } = PDFLib;
+      const src = await PDFDocument.load(buffer);
+      const totalPages = src.getPageCount();
+
+      const zip = new JSZip();
+
+      setStatus(`分割中…（全${totalPages}ページ）`);
+
+      let index = 0;
+      for (let start = 0; start < totalPages; start += chunk) {
+        const end = Math.min(start + chunk, totalPages);
+
+        const out = await PDFDocument.create();
+        const pages = await out.copyPages(
+          src,
+          Array.from({ length: end - start }, (_, i) => start + i)
+        );
+        pages.forEach(p => out.addPage(p));
+
+        const pdfBytes = await out.save();
+        const filename = `${baseName}-${index}.pdf`;
+        zip.file(filename, pdfBytes);
+
+        index++;
+        setStatus(`分割中… ${end}/${totalPages} ページ完了`);
+      }
+
+      setStatus("ZIPを生成中…");
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+
+      downloadBlob(zipBlob, `${baseName}_split.zip`);
+      setStatus("完了（ZIPのダウンロードを開始しました）");
+    });
+  </script>
+</body>
+</html>
